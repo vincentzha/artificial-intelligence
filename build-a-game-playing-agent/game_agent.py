@@ -8,11 +8,8 @@ relative strength using tournament.py and include the results in your report.
 """
 import random
 
-
 class Timeout(Exception):
     """Subclass base exception for code clarity."""
-    pass
-
 
 def custom_score(game, player):
     """Calculate the heuristic value of a game state from the point of view
@@ -35,7 +32,99 @@ def custom_score(game, player):
     """
 
     # TODO: finish this function!
-    raise NotImplementedError
+
+    # heuristic #1:
+    
+    """The heuristic assumes that, for active player, it will enjoy certain 
+    advantage when its legal moves overlap with those of its opponent, because 
+    this situation means the active player can choose to move to a location that 
+    is in the list of opponent’s potential moves, and therefore diminish opponent’s 
+    choices. So I award an extra 1 point to the active player. Other than that, the 
+    heuristic is the same as “improved” one."""
+
+    if game.is_loser(player):
+        return float("-inf")
+
+    if game.is_winner(player):
+        return float("inf")
+
+    own_moves = game.get_legal_moves(player)
+    opp_moves = game.get_legal_moves(game.get_opponent(player))
+    
+    #check for interscection of both player's moves
+    moves_inter = set(own_moves).intersection(opp_moves)
+    
+    if player == game.active_player:
+        return float(len(own_moves) - len(opp_moves) + bool(moves_inter))
+    else:
+        return float(len(own_moves) - len(opp_moves) - bool(moves_inter))
+    
+
+    # heuristic #2:
+    
+    """This heuristic assumes that, it is better stay in the center of the game 
+    board. Put another way, need to stay away from boarder and corner. This is 
+    because when staying in the center, there are potentially more choices to 
+    strategically move to a preferable area. For example, if there are a lot of 
+    blank spaces on the right hand side of the board, the player can relatively 
+    easily move to that side. For comparison, if the player is at the boarder or 
+    corner, it will be harder to get out and move to a preferable side. Other than 
+    that, the heuristic is the same as the “Improved” one."""
+
+    # function punish border and corner locations
+    def value_centerism(move):
+        value = 2
+        row, col = move
+        if row < 2 or row > game.height - 3:
+            value -= 1
+            if row < 1 or row > game.height - 2:
+                value -= 1
+        if col < 2 or col > game.width - 3:
+            value -= 1
+            if col < 1 or col > game.width - 2:
+                value -= 1
+        return value
+
+    aplayer = game.active_player
+    moves_a = game.get_legal_moves(aplayer)
+
+    if moves_a:
+        
+        iplayer = game.inactive_player
+        moves_i = game.get_legal_moves(iplayer)
+        val_a = len(moves_a) + value_centerism(game.get_player_location(aplayer))
+        val_i = len(moves_i) + value_centerism(game.get_player_location(iplayer))
+
+        return float(val_a - val_i) if player == aplayer else float(val_i - val_a)
+    else:
+        return float("-inf") if player == game.active_player else float("inf")
+
+    # heuristic #3
+
+    """This heuristic is based on “open” version. It adds a further check for a 
+    certain scenario where the inactive player only has one legal move, and that 
+    one can be immediately occupied by the active player. If this is the case, the 
+    active player can choose this step and win. Put another way, this heuristic is 
+    looking for a certain scenario where the actively player can win in the next 
+    ply. It allows for a quick “peek” at one more ply so as to expand the plies."""
+
+    aplayer = game.active_player
+    moves_a = game.get_legal_moves(aplayer)
+
+    if moves_a:
+
+        moves_i = game.get_legal_moves(game.inactive_player)
+        moves_inter = set(moves_a).intersection(moves_i)
+        
+        # check for immediate win in next ply
+        if len(moves_inter) == 1 and list(moves_inter) == moves_i:
+            return float("-inf") if player == game.active_player else float("inf")
+        
+        return float(len(moves_a)) if player == aplayer else float(len(moves_i))
+    else:
+        return float("-inf") if player == game.active_player else float("inf")
+
+#    raise NotImplementedError
 
 
 class CustomPlayer:
@@ -120,20 +209,40 @@ class CustomPlayer:
         # Perform any required initializations, including selecting an initial
         # move from the game board (i.e., an opening book), or returning
         # immediately if there are no legal moves
+        
+        if not len(legal_moves):
+            return (-1, -1)
 
         try:
             # The search method call (alpha beta or minimax) should happen in
             # here in order to avoid timeout. The try/except block will
             # automatically catch the exception raised by the search method
             # when the timer gets close to expiring
-            pass
+            
+            move = None
+            if not self.iterative:
+                if self.method == 'minimax':
+                    score, move = self.minimax(game, self.search_depth, maximizing_player=True)
+                else:
+                    score, move = self.alphabeta(game, self.search_depth, alpha=float("-inf"), beta=float("inf"), maximizing_player=True)
+            else:
+                depth_iter = 0
+                while True:
+                    if self.method == 'minimax':
+                        score, move = self.minimax(game, depth_iter, maximizing_player=True)
+                    else:
+                        score, move = self.alphabeta(game, depth_iter, alpha=float("-inf"), beta=float("inf"), maximizing_player=True)
+                    depth_iter += 1
 
         except Timeout:
             # Handle any actions required at timeout, if necessary
             pass
 
         # Return the best move from the last completed search iteration
-        raise NotImplementedError
+        # if no moves can win, still choose a move instead of giving up immediately
+        return move if move else legal_moves[0]
+
+#        raise NotImplementedError
 
     def minimax(self, game, depth, maximizing_player=True):
         """Implement the minimax search algorithm as described in the lectures.
@@ -160,11 +269,28 @@ class CustomPlayer:
         tuple(int, int)
             The best move for the current branch; (-1, -1) for no legal moves
         """
+
+        
         if self.time_left() < self.TIMER_THRESHOLD:
             raise Timeout()
 
         # TODO: finish this function!
-        raise NotImplementedError
+        
+        # identify who is the original player
+        original_player = game.active_player if maximizing_player else game.inactive_player
+        moves = game.get_legal_moves(game.active_player)
+        
+        # if checkmate of reaching the last ply, return score
+        if not (depth and moves):
+           
+            return (self.score(game, original_player), 
+                    moves[0] if moves else (-1, -1))
+        else:
+            # recursive search
+            list_scores_moves = [(self.minimax(game.forecast_move(move), depth-1, not maximizing_player)[0], move) for move in moves]
+            return (max(list_scores_moves) if maximizing_player else min(list_scores_moves))
+
+#        raise NotImplementedError
 
     def alphabeta(self, game, depth, alpha=float("-inf"), beta=float("inf"), maximizing_player=True):
         """Implement minimax search with alpha-beta pruning as described in the
@@ -202,4 +328,43 @@ class CustomPlayer:
             raise Timeout()
 
         # TODO: finish this function!
-        raise NotImplementedError
+
+
+        # identify who is the original player
+        original_player = game.active_player if maximizing_player else game.inactive_player
+        moves = game.get_legal_moves(game.active_player)
+        
+        # if checkmate of reaching the last ply, return score
+        if not (depth and moves):
+            return (self.score(game, original_player), 
+                    moves[0] if moves else (-1, -1))
+        else:
+            # recursive search
+            scores = []
+            if maximizing_player:
+                
+                for move in moves:
+                    score, _ = self.alphabeta(game.forecast_move(move), 
+                                           depth-1, 
+                                           alpha, 
+                                           beta, 
+                                           not maximizing_player)
+                    scores.append(score)
+                    if score >= beta:
+                        return (score, move)
+                    alpha = max(alpha, score)
+                return max(list(zip(scores, moves)))
+            else:
+                for move in moves:
+                    score, _ = self.alphabeta(game.forecast_move(move), 
+                                           depth-1, 
+                                           alpha, 
+                                           beta, 
+                                           not maximizing_player)
+                    scores.append(score)
+                    if score <= alpha:
+                        return (score, move)
+                    beta = min(beta, score)
+                return min(list(zip(scores, moves)))
+
+#        raise NotImplementedError
